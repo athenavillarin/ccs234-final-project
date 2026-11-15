@@ -1,0 +1,32 @@
+# markdown files stay local except the readme
+*.md
+!README.md
+
+# python cache and build output
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# virtual environments
+venv/
+.venv/
+env/
+
+# secrets and local config
+.env
+
+# generated output
+reports_out/
+*.pdf
+*.pcap
+*.db
+*.sqlite3
+logs/
+
+# editor and os files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
