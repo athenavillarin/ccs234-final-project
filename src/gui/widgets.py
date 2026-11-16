@@ -3,11 +3,18 @@ from tkinter import ttk
 
 import customtkinter as ctk
 
-TABLE_STYLE = "Devices.Treeview"
+TABLE_STYLE = "Table.Treeview"
+
+# ttk styles are shared by the whole app, so they only need to be set up once
+tables_styled = False
 
 
 # colors ttk tables to match the light or dark customtkinter theme
 def style_tables(widget):
+    global tables_styled
+    if tables_styled:
+        return
+    tables_styled = True
     dark = ctk.get_appearance_mode() == "Dark"
     background, text, heading = ("#2b2b2b", "#e6e6e6", "#353535") if dark else ("#ffffff", "#1a1a1a", "#e8e8e8")
     style = ttk.Style(widget)
