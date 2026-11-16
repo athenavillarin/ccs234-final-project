@@ -1,11 +1,11 @@
 # Discovery tab: local ip, gateway, network range and a table of active devices
 from datetime import datetime
-from tkinter import ttk
 
 import customtkinter as ctk
 
 from core import discovery
 from gui.tabs.base_tab import BaseTab
+from gui.widgets import make_table
 from gui.worker import run_in_background
 
 # (column key, heading text, width in pixels) for the device table
@@ -68,33 +68,10 @@ class DiscoveryTab(BaseTab):
         self.progress_label = ctk.CTkLabel(row, text="Press Scan Network to find devices", text_color="gray", width=280, anchor="w")
         self.progress_label.pack(side="left")
 
-    # device table (ttk treeview, since customtkinter has no table widget)
+    # table of devices found by the latest scan
     def build_table(self):
-        frame = ctk.CTkFrame(self)
+        frame, self.table = make_table(self, COLUMNS)
         frame.pack(fill="both", expand=True, padx=16, pady=(0, 12))
-        self.style_table()
-        self.table = ttk.Treeview(frame, columns=[key for key, _, _ in COLUMNS], show="headings", style="Devices.Treeview")
-        for key, heading, width in COLUMNS:
-            self.table.heading(key, text=heading, anchor="w")
-            self.table.column(key, width=width, minwidth=60, anchor="w")
-        scrollbar = ctk.CTkScrollbar(frame, command=self.table.yview)
-        self.table.configure(yscrollcommand=scrollbar.set)
-        self.table.pack(side="left", fill="both", expand=True, padx=(8, 0), pady=8)
-        scrollbar.pack(side="right", fill="y", pady=8)
-
-    # colors the treeview to match the light or dark customtkinter theme
-    def style_table(self):
-        dark = ctk.get_appearance_mode() == "Dark"
-        background, text, heading = ("#2b2b2b", "#e6e6e6", "#353535") if dark else ("#ffffff", "#1a1a1a", "#e8e8e8")
-        style = ttk.Style(self)
-        # the default windows theme ignores custom colors, "clam" respects them
-        style.theme_use("clam")
-        style.configure("Devices.Treeview", background=background, fieldbackground=background,
-                        foreground=text, rowheight=28, borderwidth=0, font=("Segoe UI", 10))
-        style.configure("Devices.Treeview.Heading", background=heading, foreground=text,
-                        relief="flat", font=("Segoe UI", 10, "bold"))
-        style.map("Devices.Treeview", background=[("selected", "#1f6aa5")], foreground=[("selected", "#ffffff")])
-        style.map("Devices.Treeview.Heading", background=[("active", heading)])
 
     # sets the big value and small detail text of one card
     def set_card(self, key, value, detail=""):
