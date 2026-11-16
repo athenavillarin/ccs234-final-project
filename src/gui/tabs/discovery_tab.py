@@ -1,11 +1,11 @@
-# Discovery tab: local ip, gateway, network range and a table of active devices
+# Discovery page: local ip, gateway, network range and a table of active devices
 from datetime import datetime
 
 import customtkinter as ctk
 
 from core import discovery
 from gui.tabs.base_tab import BaseTab
-from gui.widgets import make_table
+from gui.widgets import MUTED_TEXT, highlight_green, make_card, make_empty_state, make_table
 from gui.worker import run_in_background
 from services import db
 
@@ -50,33 +50,34 @@ class DiscoveryTab(BaseTab):
         row.pack(fill="x", padx=16)
         self.cards = {}
         for index, (key, label) in enumerate(CARDS):
-            card = ctk.CTkFrame(row)
+            card = make_card(row)
             card.pack(side="left", fill="x", expand=True, padx=(0 if index == 0 else 8, 0))
-            ctk.CTkLabel(card, text=label, text_color="gray", font=ctk.CTkFont(size=12)).pack(anchor="w", padx=12, pady=(8, 0))
+            ctk.CTkLabel(card, text=label, text_color=MUTED_TEXT, font=ctk.CTkFont(size=12)).pack(anchor="w", padx=14, pady=(10, 0))
             value = ctk.CTkLabel(card, text="...", font=ctk.CTkFont(size=18, weight="bold"))
-            value.pack(anchor="w", padx=12)
-            detail = ctk.CTkLabel(card, text="", text_color="gray", font=ctk.CTkFont(size=11))
-            detail.pack(anchor="w", padx=12, pady=(0, 8))
+            value.pack(anchor="w", padx=14)
+            detail = ctk.CTkLabel(card, text="", text_color=MUTED_TEXT, font=ctk.CTkFont(size=11))
+            detail.pack(anchor="w", padx=14, pady=(0, 10))
             self.cards[key] = (value, detail)
 
-    # scan button, progress bar and progress message
+    # scan button, progress bar and progress message; the bar is only shown while scanning
     def build_controls(self):
         row = ctk.CTkFrame(self, fg_color="transparent")
         row.pack(fill="x", padx=16, pady=12)
-        self.scan_button = ctk.CTkButton(row, text="Scan Network", width=140, command=self.start_scan)
+        self.scan_button = ctk.CTkButton(row, text="Scan Network", width=140, height=34, command=self.start_scan)
         self.scan_button.pack(side="left")
         self.progress = ctk.CTkProgressBar(row)
         self.progress.set(0)
-        self.progress.pack(side="left", fill="x", expand=True, padx=12)
-        self.progress_label = ctk.CTkLabel(row, text="Press Scan Network to find devices", text_color="gray", width=280, anchor="w")
-        self.progress_label.pack(side="left")
+        self.progress_label = ctk.CTkLabel(row, text="", text_color=MUTED_TEXT, width=280, anchor="w")
+        self.progress_label.pack(side="left", padx=12)
 
     # table of devices found by the latest scan
     def build_table(self):
         frame, self.table = make_table(self, COLUMNS)
         frame.pack(fill="both", expand=True, padx=16, pady=(0, 12))
+        self.empty_state = make_empty_state(frame, "No devices yet. Click Scan Network to find devices on your network.")
+        self.empty_state.place(relx=0.5, rely=0.5, anchor="center")
         # green text for devices that appear for the first time
-        self.table.tag_configure("new", foreground="#2fa572")
+        self.table.tag_configure("new", foreground=highlight_green())
 
     # sets the big value and small detail text of one card
     def set_card(self, key, value, detail=""):
@@ -97,6 +98,7 @@ class DiscoveryTab(BaseTab):
         usable_hosts = max(self.network.num_addresses - 2, 1)
         self.set_card("network", str(self.network), f"Mask {self.network.netmask} · {usable_hosts} hosts")
         self.set_card("count", "-", "Not scanned yet")
+        self.empty_state.configure(text=f"No devices yet. Click Scan Network to scan {self.network}.")
 
     # starts a scan in a background thread so the window stays responsive
     def start_scan(self):
@@ -105,6 +107,7 @@ class DiscoveryTab(BaseTab):
         self.scanning = True
         self.scan_button.configure(state="disabled", text="Scanning...")
         self.progress.set(0)
+        self.progress.pack(side="left", fill="x", expand=True, padx=(12, 0), before=self.progress_label)
         self.app.set_status("Scanning network...")
         run_in_background(self, discovery.scan_network, self.network, self.report_progress,
                           on_done=self.show_devices, on_error=self.show_error)
@@ -118,9 +121,11 @@ class DiscoveryTab(BaseTab):
         self.progress.set(fraction)
         self.progress_label.configure(text=message)
 
-    # fills the table with the scan results and shares them with the other tabs
-    def show_devices(self, devices):
+    # fills the table with the scan results and shares them with the other pages
+    def show_devices(self, result):
+        devices, method = result
         self.finish_scan()
+        self.app.set_scan_method(method)
         self.scan_number += 1
         scan_number = self.scan_number
         self.table.delete(*self.table.get_children())
@@ -131,6 +136,11 @@ class DiscoveryTab(BaseTab):
             # the ip is the row id so new devices can be found and marked after saving
             self.table.insert("", "end", iid=device["ip"], values=(device["ip"], hostname, device["mac"] or "-",
                                                                    device["vendor"] or "-", device["status"].upper()))
+        if devices:
+            self.empty_state.place_forget()
+        else:
+            self.empty_state.configure(text="No devices responded. Check your connection and scan again.")
+            self.empty_state.place(relx=0.5, rely=0.5, anchor="center")
         self.set_card("count", str(len(devices)), "Last scan " + datetime.now().strftime("%I:%M %p"))
         self.app.update_devices(devices)
         self.app.set_status(f"Discovery finished: {len(devices)} active devices")
@@ -167,3 +177,4 @@ class DiscoveryTab(BaseTab):
     def finish_scan(self):
         self.scanning = False
         self.scan_button.configure(state="normal", text="Scan Network")
+        self.progress.pack_forget()
