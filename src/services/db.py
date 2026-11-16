@@ -121,5 +121,19 @@ def get_scan_devices(scan_id):
 
 
 # returns devices in the latest scan that were never seen before
+# must run before save_scan, which adds every mac in the scan to known_devices
 def find_new_devices(devices):
-    raise NotImplementedError
+    with closing(connect()) as connection:
+        known = {row["mac"] for row in connection.execute("SELECT mac FROM known_devices")}
+    # the very first scan is the baseline, so nothing counts as new yet
+    if not known:
+        return []
+    # devices are matched by mac because ips change when dhcp leases renew
+    return [device for device in devices if device.get("mac") and device["mac"] not in known]
+
+
+# checks a finished scan for new devices, saves it, and returns the new devices
+def record_scan(devices, network=""):
+    new_devices = find_new_devices(devices)
+    save_scan(devices, network)
+    return new_devices
