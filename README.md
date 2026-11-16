@@ -1,6 +1,6 @@
 # Network Monitoring and Performance Analysis System
 
-CCS 234 (Networking & Communications) final project
+CCS 234 (Networks & Communications) final project
 
 A Python desktop app that discovers devices on a local network, tests connectivity, analyzes performance, gives security recommendations and generates reports.
 
