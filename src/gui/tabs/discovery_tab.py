@@ -37,6 +37,8 @@ class DiscoveryTab(BaseTab):
         self.local_ip = None
         self.network = None
         self.scanning = False
+        # counts finished scans so a slow save from an older scan is ignored
+        self.scan_number = 0
         self.build_cards()
         self.build_controls()
         self.build_table()
@@ -119,6 +121,8 @@ class DiscoveryTab(BaseTab):
     # fills the table with the scan results and shares them with the other tabs
     def show_devices(self, devices):
         self.finish_scan()
+        self.scan_number += 1
+        scan_number = self.scan_number
         self.table.delete(*self.table.get_children())
         for device in devices:
             hostname = device["hostname"] or "-"
@@ -132,18 +136,22 @@ class DiscoveryTab(BaseTab):
         self.app.set_status(f"Discovery finished: {len(devices)} active devices")
         network = str(self.network) if self.network else ""
         run_in_background(self, db.record_scan, devices, network,
-                          on_done=self.show_saved_scan, on_error=self.show_save_error)
+                          on_done=lambda new_devices: self.show_saved_scan(scan_number, new_devices),
+                          on_error=self.show_save_error)
 
-    # marks devices never seen before and tells the other tabs (history) a scan was stored
-    def show_saved_scan(self, new_devices):
+    # highlights devices never seen before and tells the other tabs (history) a scan was stored
+    def show_saved_scan(self, scan_number, new_devices):
+        self.app.broadcast("on_scan_saved")
+        # a newer scan already replaced the table, so these rows no longer match
+        if scan_number != self.scan_number or not new_devices:
+            return
         for device in new_devices:
             if self.table.exists(device["ip"]):
-                self.table.set(device["ip"], "status", "NEW")
                 self.table.item(device["ip"], tags=("new",))
-        if new_devices:
-            count = len(self.table.get_children())
-            self.app.set_status(f"Discovery finished: {count} active devices, {len(new_devices)} new")
-        self.app.broadcast("on_scan_saved")
+        count = len(self.table.get_children())
+        plural = "" if len(new_devices) == 1 else "s"
+        self.progress_label.configure(text=f"{len(new_devices)} new device{plural} (shown in green)")
+        self.app.set_status(f"Discovery finished: {count} active devices, {len(new_devices)} new")
 
     # a failed save should not hide the scan results, so only the status bar changes
     def show_save_error(self, error):
