@@ -40,6 +40,13 @@ class App(ctk.CTk):
         admin_text = "Admin: yes" if is_admin() else "Admin: no (limited scan mode)"
         ctk.CTkLabel(bar, text=admin_text, text_color="gray").pack(side="right", padx=10)
 
+    # stores the latest scan results and passes them to tabs that define on_devices_updated
+    def update_devices(self, devices):
+        self.devices = devices
+        for tab in self.tabs.values():
+            if hasattr(tab, "on_devices_updated"):
+                tab.on_devices_updated(devices)
+
     # updates the status bar message; safe to call from the gui thread only
     def set_status(self, text):
         self.status_label.configure(text=text)
