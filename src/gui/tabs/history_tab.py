@@ -40,6 +40,8 @@ class HistoryTab(BaseTab):
 
     # builds the controls, scan list and device list, then loads saved scans
     def build(self):
+        # counts history loads so an older, slower load cannot overwrite a newer one
+        self.load_number = 0
         self.build_controls()
         self.build_scan_table()
         self.build_device_table()
@@ -57,7 +59,6 @@ class HistoryTab(BaseTab):
     def build_scan_table(self):
         frame, self.scan_table = make_table(self, SCAN_COLUMNS, height=6)
         frame.pack(fill="x", padx=16)
-        self.scan_table.configure(selectmode="browse")
         self.scan_table.bind("<<TreeviewSelect>>", self.load_selected_scan)
 
     # heading and table for the devices of the selected scan
@@ -70,22 +71,38 @@ class HistoryTab(BaseTab):
 
     # reads saved scans in the background so the window stays responsive
     def load_history(self):
-        run_in_background(self, db.get_history, db.MAX_SCANS, on_done=self.show_history, on_error=self.show_error)
+        self.load_number += 1
+        load_number = self.load_number
+        run_in_background(self, db.get_history, on_done=lambda scans: self.show_history(load_number, scans),
+                          on_error=self.show_error)
 
     # fills the scan list; the scan id is used as the row id
-    def show_history(self, scans):
-        self.scan_table.delete(*self.scan_table.get_children())
+    def show_history(self, load_number, scans):
+        if load_number != self.load_number:
+            return
+        rows_before = self.scan_table.get_children()
+        newest_before = rows_before[0] if rows_before else None
+        selected_before = self.scan_table.selection()
+        self.scan_table.delete(*rows_before)
         for scan in scans:
             self.scan_table.insert("", "end", iid=str(scan["id"]),
                                    values=(format_time(scan["scanned_at"]), scan["network"] or "-", scan["device_count"]))
-        if scans:
-            plural = "" if len(scans) == 1 else "s"
-            self.summary_label.configure(text=f"{len(scans)} saved scan{plural} (the newest {db.MAX_SCANS} are kept)")
-            # show the newest scan's devices right away
-            self.scan_table.selection_set(str(scans[0]["id"]))
-        else:
+        if not scans:
             self.summary_label.configure(text="No scans saved yet. Run a scan in the Discovery tab.")
-            self.device_table.delete(*self.device_table.get_children())
+            self.clear_details()
+            return
+        plural = "" if len(scans) == 1 else "s"
+        self.summary_label.configure(text=f"{len(scans)} saved scan{plural} (the newest {db.MAX_SCANS} are kept)")
+        # stay on a scan the user picked; otherwise follow the newest scan
+        picked = selected_before[0] if selected_before and selected_before[0] != newest_before else None
+        target = picked if picked and self.scan_table.exists(picked) else str(scans[0]["id"])
+        self.scan_table.selection_set(target)
+        self.scan_table.see(target)
+
+    # empties the device table and resets its heading
+    def clear_details(self):
+        self.device_table.delete(*self.device_table.get_children())
+        self.detail_label.configure(text="Select a scan to see its devices")
 
     # loads the devices of the selected scan in the background
     def load_selected_scan(self, _event=None):
@@ -114,3 +131,4 @@ class HistoryTab(BaseTab):
     # shows a database error without crashing the app
     def show_error(self, error):
         self.summary_label.configure(text=f"Could not load history: {error}")
+        self.clear_details()
