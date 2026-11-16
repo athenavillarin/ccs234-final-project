@@ -73,38 +73,59 @@ def connect():
     return connection
 
 
-# saves one scan (timestamp and device list) and returns its id
-def save_scan(devices, network=""):
+# writes one scan, its devices and the known_devices updates using an open connection
+def insert_scan(connection, devices, network):
     scanned_at = now_iso()
-    # closing() closes the connection; the inner "with connection" commits,
-    # or rolls everything back if any insert fails
-    with closing(connect()) as connection, connection:
-        cursor = connection.execute(
-            "INSERT INTO scans (scanned_at, network, device_count) VALUES (?, ?, ?)",
-            (scanned_at, str(network), len(devices)))
-        scan_id = cursor.lastrowid
-        connection.executemany(
-            "INSERT INTO scan_devices (scan_id, ip, hostname, mac, vendor, status, avg_latency, max_latency, packet_loss)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            [(scan_id, device["ip"], device.get("hostname", ""), device.get("mac", ""), device.get("vendor", ""),
-              device.get("status", ""), device.get("avg_latency"), device.get("max_latency"), device.get("packet_loss"))
-             for device in devices])
-        # insert macs seen for the first time, refresh the rest
-        connection.executemany(
-            "INSERT INTO known_devices (mac, first_seen, last_seen, last_ip, hostname, vendor) VALUES (?, ?, ?, ?, ?, ?)"
-            " ON CONFLICT(mac) DO UPDATE SET last_seen = excluded.last_seen, last_ip = excluded.last_ip,"
-            " hostname = CASE WHEN excluded.hostname != '' THEN excluded.hostname ELSE known_devices.hostname END,"
-            " vendor = excluded.vendor",
-            [(device["mac"], scanned_at, scanned_at, device["ip"], device.get("hostname", ""), device.get("vendor", ""))
-             for device in devices if device.get("mac")])
-        # keep only the newest scans; their device rows go with them (on delete cascade)
-        connection.execute(
-            "DELETE FROM scans WHERE id NOT IN (SELECT id FROM scans ORDER BY id DESC LIMIT ?)", (MAX_SCANS,))
+    cursor = connection.execute(
+        "INSERT INTO scans (scanned_at, network, device_count) VALUES (?, ?, ?)",
+        (scanned_at, str(network), len(devices)))
+    scan_id = cursor.lastrowid
+    connection.executemany(
+        "INSERT INTO scan_devices (scan_id, ip, hostname, mac, vendor, status, avg_latency, max_latency, packet_loss)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [(scan_id, device["ip"], device.get("hostname", ""), device.get("mac", ""), device.get("vendor", ""),
+          device.get("status", ""), device.get("avg_latency"), device.get("max_latency"), device.get("packet_loss"))
+         for device in devices])
+    # insert macs seen for the first time, refresh the rest; blank names never
+    # overwrite known ones (e.g. vendor lookup unavailable while offline)
+    connection.executemany(
+        "INSERT INTO known_devices (mac, first_seen, last_seen, last_ip, hostname, vendor) VALUES (?, ?, ?, ?, ?, ?)"
+        " ON CONFLICT(mac) DO UPDATE SET last_seen = excluded.last_seen, last_ip = excluded.last_ip,"
+        " hostname = CASE WHEN excluded.hostname != '' THEN excluded.hostname ELSE known_devices.hostname END,"
+        " vendor = CASE WHEN excluded.vendor != '' THEN excluded.vendor ELSE known_devices.vendor END",
+        [(device["mac"], scanned_at, scanned_at, device["ip"], device.get("hostname", ""), device.get("vendor", ""))
+         for device in devices if device.get("mac")])
+    # keep only the newest scans; their device rows go with them (on delete cascade)
+    connection.execute(
+        "DELETE FROM scans WHERE id NOT IN (SELECT id FROM scans ORDER BY id DESC LIMIT ?)", (MAX_SCANS,))
     return scan_id
 
 
+# returns the devices whose mac is not in known_devices yet, using an open connection
+def select_new_devices(connection, devices):
+    # the very first scan is the baseline, so nothing counts as new yet
+    if connection.execute("SELECT 1 FROM known_devices LIMIT 1").fetchone() is None:
+        return []
+    macs = {device["mac"] for device in devices if device.get("mac")}
+    if not macs:
+        return []
+    placeholders = ", ".join("?" * len(macs))
+    known = {row["mac"] for row in connection.execute(
+        f"SELECT mac FROM known_devices WHERE mac IN ({placeholders})", tuple(macs))}
+    # devices are matched by mac because ips change when dhcp leases renew
+    return [device for device in devices if device.get("mac") and device["mac"] not in known]
+
+
+# saves one scan (timestamp and device list) and returns its id
+def save_scan(devices, network=""):
+    # closing() closes the connection; the inner "with connection" commits,
+    # or rolls everything back if any insert fails
+    with closing(connect()) as connection, connection:
+        return insert_scan(connection, devices, network)
+
+
 # returns past scans, newest first
-def get_history(limit=20):
+def get_history(limit=MAX_SCANS):
     with closing(connect()) as connection:
         rows = connection.execute(
             "SELECT id, scanned_at, network, device_count FROM scans ORDER BY id DESC LIMIT ?", (limit,))
@@ -121,19 +142,17 @@ def get_scan_devices(scan_id):
 
 
 # returns devices in the latest scan that were never seen before
-# must run before save_scan, which adds every mac in the scan to known_devices
 def find_new_devices(devices):
     with closing(connect()) as connection:
-        known = {row["mac"] for row in connection.execute("SELECT mac FROM known_devices")}
-    # the very first scan is the baseline, so nothing counts as new yet
-    if not known:
-        return []
-    # devices are matched by mac because ips change when dhcp leases renew
-    return [device for device in devices if device.get("mac") and device["mac"] not in known]
+        return select_new_devices(connection, devices)
 
 
 # checks a finished scan for new devices, saves it, and returns the new devices
 def record_scan(devices, network=""):
-    new_devices = find_new_devices(devices)
-    save_scan(devices, network)
+    with closing(connect()) as connection, connection:
+        # take the write lock before reading, so two saves at once cannot
+        # both report the same device as new
+        connection.execute("BEGIN IMMEDIATE")
+        new_devices = select_new_devices(connection, devices)
+        insert_scan(connection, devices, network)
     return new_devices
