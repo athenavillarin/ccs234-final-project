@@ -44,9 +44,3 @@ src/
   services/      database and email notifications
   utils/         shared helpers and config
 ```
-
-## Team
-
-- Person 1: scaffold, GUI, integration, discovery, MAC vendor, new-device alerts, database and history
-- Person 2: ping, statistics, real-time monitoring, charts, health score, packet capture
-- Person 3: reports, PDF export, email, security recommendations, port scanner
