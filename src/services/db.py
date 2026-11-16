@@ -1,8 +1,13 @@
 # sqlite storage, scan history and optional cloud sync
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from utils import config
+from utils.device import now_iso
+
+# older scans beyond this count are deleted after each save
+MAX_SCANS = 100
 
 # scans: one row per scan
 # scan_devices: the devices found in each scan, removed together with their scan
@@ -69,13 +74,50 @@ def connect():
 
 
 # saves one scan (timestamp and device list) and returns its id
-def save_scan(devices):
-    raise NotImplementedError
+def save_scan(devices, network=""):
+    scanned_at = now_iso()
+    # closing() closes the connection; the inner "with connection" commits,
+    # or rolls everything back if any insert fails
+    with closing(connect()) as connection, connection:
+        cursor = connection.execute(
+            "INSERT INTO scans (scanned_at, network, device_count) VALUES (?, ?, ?)",
+            (scanned_at, str(network), len(devices)))
+        scan_id = cursor.lastrowid
+        connection.executemany(
+            "INSERT INTO scan_devices (scan_id, ip, hostname, mac, vendor, status, avg_latency, max_latency, packet_loss)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [(scan_id, device["ip"], device.get("hostname", ""), device.get("mac", ""), device.get("vendor", ""),
+              device.get("status", ""), device.get("avg_latency"), device.get("max_latency"), device.get("packet_loss"))
+             for device in devices])
+        # insert macs seen for the first time, refresh the rest
+        connection.executemany(
+            "INSERT INTO known_devices (mac, first_seen, last_seen, last_ip, hostname, vendor) VALUES (?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(mac) DO UPDATE SET last_seen = excluded.last_seen, last_ip = excluded.last_ip,"
+            " hostname = CASE WHEN excluded.hostname != '' THEN excluded.hostname ELSE known_devices.hostname END,"
+            " vendor = excluded.vendor",
+            [(device["mac"], scanned_at, scanned_at, device["ip"], device.get("hostname", ""), device.get("vendor", ""))
+             for device in devices if device.get("mac")])
+        # keep only the newest scans; their device rows go with them (on delete cascade)
+        connection.execute(
+            "DELETE FROM scans WHERE id NOT IN (SELECT id FROM scans ORDER BY id DESC LIMIT ?)", (MAX_SCANS,))
+    return scan_id
 
 
 # returns past scans, newest first
 def get_history(limit=20):
-    raise NotImplementedError
+    with closing(connect()) as connection:
+        rows = connection.execute(
+            "SELECT id, scanned_at, network, device_count FROM scans ORDER BY id DESC LIMIT ?", (limit,))
+        return [dict(row) for row in rows]
+
+
+# returns the devices saved with one scan, in the order they were found
+def get_scan_devices(scan_id):
+    with closing(connect()) as connection:
+        rows = connection.execute(
+            "SELECT ip, hostname, mac, vendor, status, avg_latency, max_latency, packet_loss"
+            " FROM scan_devices WHERE scan_id = ? ORDER BY rowid", (scan_id,))
+        return [dict(row) for row in rows]
 
 
 # returns devices in the latest scan that were never seen before
