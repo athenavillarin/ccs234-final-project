@@ -1,5 +1,4 @@
 # network statistics and health score
-# owner: person 2
 
 
 # returns summary stats (counts, average/max latency, loss) for a device list

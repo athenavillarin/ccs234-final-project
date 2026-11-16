@@ -1,5 +1,4 @@
 # txt and csv report generation
-# owner: person 3
 
 
 # writes a plain text report and returns its path

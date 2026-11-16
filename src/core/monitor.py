@@ -1,5 +1,4 @@
 # real-time monitoring loop that pings devices on an interval
-# owner: person 2
 
 
 # runs periodic pings in a background thread and reports results via callback

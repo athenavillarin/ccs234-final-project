@@ -1,5 +1,4 @@
 # network discovery: local ip, network range, active devices, hostname, mac vendor
-# owner: person 1
 
 
 # returns this machine's ip on the active lan interface

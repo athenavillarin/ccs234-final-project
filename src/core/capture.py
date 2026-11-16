@@ -1,5 +1,4 @@
 # packet capture integration (scapy)
-# owner: person 2
 
 
 # captures packets for a duration and returns a summary list

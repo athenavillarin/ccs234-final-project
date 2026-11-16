@@ -1,5 +1,4 @@
 # port scanner with risk notes
-# owner: person 3
 
 
 # scans the given ports on a host and returns the list of open ports

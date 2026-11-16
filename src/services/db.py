@@ -1,5 +1,4 @@
 # sqlite storage, scan history and optional cloud sync
-# owner: person 1
 
 
 # creates the database file and tables if they do not exist
