@@ -232,7 +232,8 @@ def report(on_progress, fraction, message):
         on_progress(fraction, message)
 
 
-# scans the range and returns a list of device dicts for responding hosts
+# scans the range and returns (devices, method): device dicts for responding hosts
+# and the method that found them, "ARP scan" or "ping sweep"
 # on_progress(fraction, message) is called from the worker thread as the scan advances
 def scan_network(network=None, on_progress=None):
     local_ip = get_local_ip()
@@ -268,4 +269,4 @@ def scan_network(network=None, on_progress=None):
         devices.append(new_device(ip, hostname=hostname, mac=mac, vendor=lookup_vendor(mac), status="up"))
 
     report(on_progress, 1.0, f"Found {len(devices)} devices using {method}")
-    return devices
+    return devices, method
