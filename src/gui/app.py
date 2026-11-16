@@ -43,9 +43,14 @@ class App(ctk.CTk):
     # stores the latest scan results and passes them to tabs that define on_devices_updated
     def update_devices(self, devices):
         self.devices = devices
+        self.broadcast("on_devices_updated", devices)
+
+    # calls method_name(*args) on every tab that defines it
+    def broadcast(self, method_name, *args):
         for tab in self.tabs.values():
-            if hasattr(tab, "on_devices_updated"):
-                tab.on_devices_updated(devices)
+            handler = getattr(tab, method_name, None)
+            if handler:
+                handler(*args)
 
     # updates the status bar message; safe to call from the gui thread only
     def set_status(self, text):

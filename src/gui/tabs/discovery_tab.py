@@ -7,6 +7,7 @@ from core import discovery
 from gui.tabs.base_tab import BaseTab
 from gui.widgets import make_table
 from gui.worker import run_in_background
+from services import db
 
 # (column key, heading text, width in pixels) for the device table
 COLUMNS = (
@@ -126,6 +127,17 @@ class DiscoveryTab(BaseTab):
         self.set_card("count", str(len(devices)), "Last scan " + datetime.now().strftime("%I:%M %p"))
         self.app.update_devices(devices)
         self.app.set_status(f"Discovery finished: {len(devices)} active devices")
+        network = str(self.network) if self.network else ""
+        run_in_background(self, db.record_scan, devices, network,
+                          on_done=self.show_saved_scan, on_error=self.show_save_error)
+
+    # tells the other tabs (history) that a new scan was stored
+    def show_saved_scan(self, new_devices):
+        self.app.broadcast("on_scan_saved")
+
+    # a failed save should not hide the scan results, so only the status bar changes
+    def show_save_error(self, error):
+        self.app.set_status(f"Scan finished, but saving to history failed: {error}")
 
     # shows a failed lookup or scan without crashing the app
     def show_error(self, error):
