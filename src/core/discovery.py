@@ -23,6 +23,9 @@ ARP_LINE = re.compile(r"(\d{1,3}(?:\.\d{1,3}){3})\D+?([0-9a-fA-F]{2}(?:[:-][0-9a
 
 BROADCAST_MAC = "ff:ff:ff:ff:ff:ff"
 
+# oui prefix -> vendor name, loaded on first use
+vendor_table = None
+
 
 # returns this machine's ip on the active lan interface
 def get_local_ip():
@@ -177,12 +180,50 @@ def ping_sweep(network, on_progress=None):
 
 # resolves an ip to a hostname, returns "" when it cannot be resolved
 def resolve_hostname(ip):
-    raise NotImplementedError
+    try:
+        # reverse lookup: dns ptr record, then netbios/mdns on windows
+        name = socket.gethostbyaddr(ip)[0]
+        # windows echoes the ip back when no name exists
+        return "" if name == ip else name
+    except (socket.herror, socket.gaierror, OSError):
+        return ""
+
+
+# loads the offline oui table downloaded by mac-vendor-lookup
+def load_vendor_table():
+    global vendor_table
+    if vendor_table is not None:
+        return vendor_table
+    vendor_table = {}
+    try:
+        from mac_vendor_lookup import BaseMacLookup, MacLookup
+        path = BaseMacLookup().find_vendors_list()
+        if not path:
+            # first run only: download the ieee oui list (needs internet)
+            MacLookup().update_vendors()
+            path = BaseMacLookup().find_vendors_list()
+        with open(path, encoding="utf-8", errors="replace") as file:
+            # each line looks like "286FB9:Nokia Shanghai Bell Co., Ltd."
+            for line in file:
+                prefix, _sep, vendor = line.strip().partition(":")
+                if vendor:
+                    vendor_table[prefix.upper()] = vendor
+    except Exception:
+        pass
+    return vendor_table
 
 
 # looks up the vendor name for a mac address from the offline oui table
 def lookup_vendor(mac):
-    raise NotImplementedError
+    if not mac:
+        return ""
+    digits = mac.replace(":", "").upper()
+    # the second bit of the first byte marks a "locally administered" address;
+    # phones and laptops set it when they use a random private mac for privacy
+    if int(digits[:2], 16) & 0x02:
+        return "Private (randomized MAC)"
+    # the first 3 bytes (oui) identify the manufacturer
+    return load_vendor_table().get(digits[:6], "")
 
 
 # calls the progress callback if one was given
@@ -213,7 +254,18 @@ def scan_network(network=None, on_progress=None):
     if ipaddress.IPv4Address(local_ip) in network and not found.get(local_ip):
         found[local_ip] = get_own_mac(local_ip)
 
-    devices = [new_device(ip, mac=found[ip], status="up") for ip in sorted(found, key=ipaddress.IPv4Address)]
+    # reverse dns can be slow per host, so resolve all names in parallel
+    report(on_progress, 0.9, "Resolving hostnames...")
+    ips = sorted(found, key=ipaddress.IPv4Address)
+    with ThreadPoolExecutor(max_workers=32) as pool:
+        hostnames = list(pool.map(resolve_hostname, ips))
+
+    devices = []
+    for ip, hostname in zip(ips, hostnames):
+        if ip == local_ip and not hostname:
+            hostname = socket.gethostname()
+        mac = found[ip]
+        devices.append(new_device(ip, hostname=hostname, mac=mac, vendor=lookup_vendor(mac), status="up"))
 
     report(on_progress, 1.0, f"Found {len(devices)} devices using {method}")
     return devices
